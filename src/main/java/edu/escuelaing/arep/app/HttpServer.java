@@ -1,11 +1,10 @@
 package edu.escuelaing.arep.app;
 
+import edu.escuelaing.arep.app.controller.Component;
+import edu.escuelaing.arep.app.controller.ErrorMapping;
 import edu.escuelaing.arep.app.controller.RequestMapping;
-import edu.escuelaing.arep.app.spark.Response;
-import edu.escuelaing.arep.app.spark.Spark;
-import org.json.JSONArray;
-import org.json.JSONObject;
 
+import java.awt.event.KeyEvent;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.*;
@@ -18,7 +17,8 @@ public class HttpServer {
 
     private static OutputStream outputStream = null;
 
-    public Map<String, Method> services = new HashMap<>();
+    public static Map<String, Method> services = new HashMap<>();
+    public static Method error = null;
 
     public static HttpServer getInstance(){
         return _instance;
@@ -28,22 +28,33 @@ public class HttpServer {
 
     /**
      * Método principal, inicia un socket
-     * recibe la petición get y agrega el nombre a de la
-     * película seleccionada a la URL de la API
+     * recibe la petición get y en base al path
+     * retorna el recurso
      * @param args
      * @throws IOException
      */
     public void run(String[] args) throws IOException, ClassNotFoundException, InvocationTargetException, IllegalAccessException {
-        String className = args[0];
-        Class c = Class.forName(className);
-        Method[] m = c.getMethods();
-        for(Method ms : m){
-            if(ms.isAnnotationPresent(RequestMapping.class)){
-                String key = ms.getAnnotation(RequestMapping.class).value();
-                services.put(key, ms);
-                System.out.println("key:" + key + " method: " + services.get(key));
+        String raiz = "edu.escuelaing.arep.app.controller";
+        Set<Class<?>> classSet = getClasses(raiz);
+        for(Class<?> clazz : classSet){
+            boolean hasMyAnnotation = clazz.isAnnotationPresent(Component.class);
+            if(hasMyAnnotation){
+                String className = clazz.getName();
+                Class<?> c = Class.forName(className);
+                Method[] m = c.getMethods();
+                for(Method ms : m){
+                    if(ms.isAnnotationPresent(RequestMapping.class)){
+                        String key = ms.getAnnotation(RequestMapping.class).value();
+                        services.put(key, ms);
+                        System.out.println("key: " + key + " value: " + ms);
+                    }else if(ms.isAnnotationPresent(ErrorMapping.class)){
+                        System.out.println(ms);
+                        error = ms;
+                    }
+                }
             }
         }
+
         // Cargar clase con forname
         // Extraer metodos con anotacion RequestMapping
         // Extraer el valor del path
@@ -78,18 +89,10 @@ public class HttpServer {
                     path = inputLine.split(" ")[1];
                     if(!Objects.equals(path, "/favicon.ico")){
                         if(services.containsKey(path)){
-                            System.out.println(services.get(path).getName());
-                            System.out.println(path);
                             outputLine = (String) services.get(path).invoke(null);
-
+                        }else{
+                            outputLine = (String) error.invoke(null);
                         }
-//                        if(Spark.cache.containsKey(path)){
-//                            outputLine = Spark.cache.get(path).getResponse();
-//                        }
-//                        else{
-//                            Spark.setCache(path);
-//                            outputLine = Spark.cache.get(path).getResponse();
-//                        }
                     }
                 }
 //                else if(inputLine.startsWith("POST")){
@@ -110,6 +113,49 @@ public class HttpServer {
             clientSocket.close();
         }
         serverSocket.close();
-    };
+    }
+
+    public OutputStream getOutputStream() {
+        return outputStream;
+    }
+
+    /**
+     * metodo que busca los diferentes archivos .class en base a una ruta de un posible
+     * directorio, asegurandose que este lo sea, una vez encuentra los archivos .class
+     * los concatena con el path suministrado y los agrega a un set que sera retornado
+     * @param raiz path de la carpeta que se desea analizar
+     * @return set de todas las clases en un directorio especifico
+     */
+    private static Set<Class<?>> getClasses(String raiz){
+        Set<Class<?>> classes = new HashSet<>();
+        String path = raiz.replace(".", "/");
+        try{
+            File file = new File(getClassPaths() + "/" + path);
+            if(file.exists() && file.isDirectory()){
+                for(File classFile : file.listFiles()){
+                    if(classFile.isFile() && classFile.getName().endsWith(".class")){
+                        String className = raiz + "." + classFile.getName().replace(".class", "");
+                        Class<?> clazz = Class.forName(className);
+                        classes.add(clazz);
+                    }
+                }
+            }
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+        return classes;
+    }
+
+
+    /**
+     * metodo que busca la ubicacion de la carpeta target
+     * @return path de la carpeta target
+     */
+    private static String getClassPaths() {
+        String classPath = System.getProperty("java.class.path");
+        String[] classPaths = classPath.split(System.getProperty("path.separator"));
+        return classPaths[0];
+    }
+
 }
 
